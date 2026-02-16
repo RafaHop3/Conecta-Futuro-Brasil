@@ -34,3 +34,11 @@ build/
 dist/
 __pycache__/
 *.spec
+
+# Caches e Binarios
+venv/
+build/
+dist/
+__pycache__/
+*.spec
+.env

@@ -2,7 +2,7 @@
 import os
 
 def check_and_install_driver():
-    \"\"\"Verifica a presença do driver WireGuard NT e instala se necessário\"\"\"
+    """Verifica a presença do driver WireGuard NT e instala se necessário"""
     # Caminho padrão onde o executável deve estar após instalado
     target_path = "C:\\Program Files\\WireGuard\\wireguard.exe"
     
@@ -12,8 +12,7 @@ def check_and_install_driver():
         
         if os.path.exists(installer):
             try:
-                # O parâmetro /S executa a instalação silenciosa (sem janelas)
-                # O software se torna autosuficiente para o usuário final
+                # O parâmetro /S executa a instalação silenciosa
                 subprocess.run([installer, "/S"], check=True)
                 return "Driver instalado com sucesso."
             except Exception as e:
