@@ -1,44 +1,6 @@
-# --- Python Basics ---
+﻿venv/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.venv/
-
-# --- Variáveis de Ambiente e Segredos (CRÍTICO) ---
+moneylayer.db
 .env
-.env.local
-*.key
-*.pem
-
-# --- Arquivos de Configuração da VPN ---
-network/vpn_configs/*.conf
-network/vpn_configs/*.key
-
-# --- Logs e Bancos Locais ---
-logs/
-*.log
-*.sqlite3
-
-# --- IDEs ---
-.vscode/
-.idea/
-# Bin�rios e Drivers (Fase 1)
-network/bin/
-
-# Build e Tempor�rios
-build/
-dist/
-__pycache__/
-*.spec
-
-# Caches e Binarios
-venv/
-build/
-dist/
-__pycache__/
-*.spec
-.env
+static/*.pdf
+network/vpn_configs/

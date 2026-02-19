@@ -1,0 +1,20 @@
+def create_vpn_config(server_ip="192.168.100.1", client_ip="10.0.0.2"):
+    """Força a geração de Split Tunneling para preservar o Wi-Fi"""
+    
+    # Restrição de tráfego: apenas IPs da rede VPN passam pelo túnel
+    allowed_ips = "10.0.0.0/24, 192.168.100.0/24"
+
+    priv_key, pub_key = generate_wireguard_keys()
+
+    config_content = f"""[Interface]
+# TheOrbeSystems Secure Tunnel - SPLIT MODE
+PrivateKey = {priv_key}
+Address = {client_ip}/32
+
+[Peer]
+PublicKey = {SERVER_PUB_KEY}
+AllowedIPs = {allowed_ips}
+Endpoint = {server_ip}:51820
+PersistentKeepalive = 25
+"""
+    # ... código de salvamento continua igual ...
