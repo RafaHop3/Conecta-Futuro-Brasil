@@ -1,38 +1,28 @@
-﻿# 🛡️ TheOrbeSystems | Protocolo Zero
-> **Status**: Blindado (Active Defense) | **Foco**: Interesse Social e Controle Global
+﻿# 🌐 Protocolo Conecta Futuro Brasil
+> **Plataforma de Impacto Social com Defesa Ativa (SOC) e Gamificação.**
 
-O **TheOrbeSystems** é uma infraestrutura de segurança cibernética projetada para garantir a integridade do **MoneyLayer 2.0**, um sistema financeiro de interesse social. O projeto implementa o protocolo **Taxa Zero**, visando eliminar conexões não autorizadas em tempo real.
+![Status](https://img.shields.io/badge/Status-Ativo-00d2ff?style=for-the-badge)
+![Segurança](https://img.shields.io/badge/Cyber_Safety-Honeypot_Ativo-ff003c?style=for-the-badge)
+![Licença](https://img.shields.io/badge/Licen%C3%A7a-Uso_Social_Apenas-00ff00?style=for-the-badge)
+
+## 🎯 Missão
+O **Conecta Futuro Brasil** (antigo MoneyLayer) é uma infraestrutura projetada para controlar valores globais com um interesse totalmente social. O objetivo é conectar usuários a oportunidades reais de educação, emprego e moradia, recompensando-os com XP de produtividade social.
 
 ## 🚀 Funcionalidades Principais
+- **Hub de Oportunidades:** Conexão em tempo real com programas de Cyber Safety da Cisco, vagas tech no LinkedIn e programas habitacionais do Governo Federal.
+- **Livro-Razão (Auditoria):** Cada candidatura gera um Hash criptográfico imutável.
+- **Motor de Gamificação:** Os usuários sobem de nível (Iniciante > Pleno > Sênior de Transformação) conforme interagem com as oportunidades.
 
-### 1. Auditoria Zero (Raio-X)
-- Monitoramento contínuo de conexões de rede via `psutil`.
-- **Inteligência Geográfica**: Identifica e expulsa processos suspeitos (ex: conexões de servidores desconhecidos).
-- **Auto-Defesa**: O sistema encerra processos invasores automaticamente, ignorando serviços vitais do kernel (PID 0/4).
+## 👁️‍🗨️ SOC Cyberpunk e Cyber Safety (Aviso aos Navegantes)
+Este sistema possui um **Centro de Operações de Segurança (SOC)** integrado com Defesa Ativa:
+1. **Honeypot:** Rotas sensíveis (como `/wp-admin` ou `.env`) são armadilhas. Qualquer tentativa de acesso não autorizada registrará imediatamente o IP, Cidade e Provedor (ISP) do atacante no painel de vigilância.
+2. **EDR (Endpoint Detection and Response):** Motor de espurgação em RAM capaz de neutralizar processos suspeitos em tempo real.
 
-### 2. Túnel de Criptografia Autônomo
-- **Instalação Silenciosa**: O sistema verifica e instala drivers WireGuard NT sem intervenção do usuário.
-- **Ativação One-Click**: Gerenciamento de serviços de túnel via CLI administrativo.
+⚠️ **O CRIME NÃO COMPENSA.** A plataforma monitora conexões ativamente.
 
-### 3. Cadeado MoneyLayer (Interesse Social)
-- O acesso ao módulo financeiro é **bloqueado fisicamente** a menos que:
-  - A VPN esteja ativa e criptografada.
-  - O Risco de Segurança seja ZERO.
-- Garante que recursos de interesse social jamais sejam expostos a ambientes inseguros.
-
-## 🛠️ Stack Tecnológica
-
-- **Core**: Python 3.10 + FastAPI
-- **Segurança**: Cryptography (Elliptic Curve25519) + Scapy
-- **Infraestrutura**: WireGuard NT Drivers
-- **Interface**: HTML5/CSS3 (Dashboard Cyberpunk) + JavaScript Assíncrono
-
-## 📦 Como Iniciar
-
-1. Execute o `main.py` como **Administrador**.
-2. O sistema validará os drivers de rede automaticamente.
-3. Acesse `http://127.0.0.1:8000` para visualizar o Dashboard.
+## ⚖️ Licença de Uso
+Projeto de autoria de **Rafael Machado Gomes Machado**.
+É estritamente proibida a comercialização, venda ou uso para fins lucrativos desta infraestrutura. O código é aberto exclusivamente para fins de estudo e impacto social.
 
 ---
-*Desenvolvido por Rafael Machado Gomes Machado | Conecta Futuro Brasil © 2026*
-*Projeto protegido por prova de anterioridade em repositório privado.*
+*Construído com Python, FastAPI, SQLite e muito Cyber Safety.*
