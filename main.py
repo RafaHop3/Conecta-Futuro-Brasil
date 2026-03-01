@@ -1,248 +1,138 @@
-﻿import hashlib, os, socket, psutil, requests
+from fastapi import FastAPI, Body, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+import uvicorn, socket, hashlib, json, urllib.request, time
 from datetime import datetime
-from fastapi import FastAPI, Depends, Body, Request, HTTPException
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from sqlalchemy import Column, Integer, String, DateTime, Float
-from sqlalchemy.orm import Session
-from moneylayer.database import engine, Base, get_db
 
-# --- MODELOS DE BANCO DE DADOS ---
-class Enrollment(Base):
-    __tablename__ = "enrollments"
-    id = Column(Integer, primary_key=True, index=True)
-    user_name = Column(String); program_name = Column(String)
-    blockchain_hash = Column(String); timestamp = Column(DateTime, default=datetime.utcnow)
+# SOC: Honeypot & Defesa Ativa
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+BANNED = set()
+TRAPS = list(("/.env", "/wp-admin", "/admin", "/docs", "/redoc", "/openapi.json"))
 
-class ThreatLog(Base):
-    __tablename__ = "threats"
-    id = Column(Integer, primary_key=True, index=True)
-    ip_address = Column(String); city = Column(String); isp = Column(String)
-    endpoint_attacked = Column(String); timestamp = Column(DateTime, default=datetime.utcnow)
+def get_ip(req):
+    try:
+        f = req.headers.get("x-forwarded-for")
+        if f: return str(f).split(",").strip()
+        return req.client.host if req.client else "127.0.0.1"
+    except: return "127.0.0.1"
 
-# NOVOS MODELOS ANTI-CORRUPÇÃO
-class SocialFund(Base):
-    __tablename__ = "social_fund"
-    id = Column(Integer, primary_key=True, index=True)
-    global_value = Column(Float, default=0.0)
+@app.middleware("http")
+async def security_layer(req: Request, call_next):
+    ip = get_ip(req)
+    if ip in BANNED or any(t in req.url.path for t in TRAPS):
+        BANNED.add(ip)
+        print(f"\n[!!!] BLOQUEIO SOC: {ip} BANIDO")
+        return JSONResponse(status_code=403, content={"SOC": "BLOCK_IP"})
+    res = await call_next(req)
+    res.headers["X-Project"] = "CFB-Elite-V13"
+    return res
 
-class Transaction(Base):
-    __tablename__ = "transactions"
-    id = Column(Integer, primary_key=True, index=True)
-    description = Column(String); amount = Column(Float)
-    tx_hash = Column(String); timestamp = Column(DateTime, default=datetime.utcnow)
+@app.post("/api/osint/scan")
+async def run_osint(payload = Body(...)):
+    raw = payload.get("target", "")
+    t = raw.replace("https://", "").replace("http://", "").split("/").split(":")
+    logs = [f"> [SCAN] Infiltrando em: {t}"]
+    try:
+        ip = socket.gethostbyname(t)
+        logs.append(f"> [DNS] IP Identificado: {ip}")
+        try:
+            with urllib.request.urlopen(f"http://ip-api.com/json/{ip}", timeout=3) as r:
+                d = json.loads(r.read().decode())
+                if d.get("status") == "success":
+                    logs.append(f"> [GEO] {d.get('city')}, {d.get('country')} | {d.get('isp')}")
+        except: pass
+        for p in list((22, 80, 443, 3389)):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(0.3)
+            if s.connect_ex((ip, p)) == 0: logs.append(f"> [PORTA] {p} ATIVA")
+            s.close()
+    except: logs.append("> [ALERTA] Alvo Blindado ou Offline.")
+    return {"status": "success", "logs": logs}
 
-class PublicFeedback(Base):
-    __tablename__ = "public_feedback"
-    id = Column(Integer, primary_key=True, index=True)
-    report_text = Column(String); tracking_hash = Column(String)
-    status = Column(String, default="SOB INVESTIGAÇÃO"); timestamp = Column(DateTime, default=datetime.utcnow)
+@app.post("/api/social/cep")
+async def get_cep(payload = Body(...)):
+    cep = payload.get("cep", "").replace("-", "")
+    try:
+        with urllib.request.urlopen(f"https://brasilapi.com.br/api/cep/v1/{cep}", timeout=3) as r:
+            return json.loads(r.read().decode())
+    except: return {"error": "CEP Inválido"}
 
-Base.metadata.create_all(bind=engine)
-app = FastAPI()
-if os.path.exists("static"): app.mount("/static", StaticFiles(directory="static"), name="static")
+@app.post("/api/finance/pix")
+async def gen_pix(req: Request, payload = Body(...)):
+    val = payload.get("amount", 0); ip = get_ip(req)
+    h = hashlib.sha256(f"{val}{ip}{time.time()}".encode()).hexdigest()[:16]
+    qr = f"https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=PIX_{h}"
+    return {"status": "success", "hash": h, "qr": qr, "ip": ip}
 
-# Inicializa Fundo Social Zero se não existir
-def init_fund(db: Session):
-    fund = db.query(SocialFund).first()
-    if not fund:
-        fund = SocialFund(global_value=150000.00) # Fundo inicial simulado para transparência
-        db.add(fund); db.commit()
-    return fund
-
-# --- ROTAS DO SOC E EDR ---
-SIGNATURES = ['wireshark.exe', 'ncat.exe', 'nc.exe', 'mimikatz.exe', 'notepad.exe']
-
-def perform_raio_x():
-    hostname = socket.gethostname(); ip_addr = socket.gethostbyname(hostname)
-    found = [p.info['name'] for p in psutil.process_iter(['name']) if p.info['name'] and p.info['name'].lower() in SIGNATURES]
-    return {"ip": ip_addr, "host": hostname, "status": "SISTEMA SEGURO" if not found else f"INVASOR DETECTADO: {found[0]}"}
-
-@app.get("/api/soc/threats")
-async def get_threats(db: Session = Depends(get_db)):
-    return {"threats": db.query(ThreatLog).order_by(ThreatLog.id.desc()).limit(15).all()}
-
-# --- ROTAS ANTI-CORRUPÇÃO E TRANSPARÊNCIA ---
-@app.get("/api/transparency/ledger")
-async def get_ledger(db: Session = Depends(get_db)):
-    fund = init_fund(db)
-    txs = db.query(Transaction).order_by(Transaction.id.desc()).limit(5).all()
-    feedbacks = db.query(PublicFeedback).order_by(PublicFeedback.id.desc()).limit(5).all()
-    return {"total_fund": fund.global_value, "transactions": txs, "feedbacks": feedbacks}
-
-@app.post("/api/transparency/report")
-async def submit_report(payload: dict = Body(...), db: Session = Depends(get_db)):
-    report_text = payload.get('text', '')
-    if len(report_text) < 5: raise HTTPException(status_code=400, detail="Relato muito curto.")
-    
-    # Gera hash de rastreio anônimo
-    t_hash = hashlib.sha256(f"{report_text}{datetime.now()}".encode()).hexdigest()
-    db.add(PublicFeedback(report_text=report_text, tracking_hash=t_hash))
-    db.commit()
-    return {"status": "sucesso", "tracking_hash": t_hash}
-
-# --- ROTAS SOCIAIS ---
-@app.post("/api/moneylayer/apply")
-async def apply(payload: dict = Body(...), db: Session = Depends(get_db)):
-    user = "Rafael Machado Gomes Machado"; prog = payload.get('program', 'Protocolo CFB')
-    b_hash = hashlib.sha256(f"{user}{prog}{datetime.now()}".encode()).hexdigest()
-    db.add(Enrollment(user_name=user, program_name=prog, blockchain_hash=b_hash)); db.commit()
-    return {"status": "ok"}
-
-@app.get("/", response_class=HTMLResponse)
-async def home(db: Session = Depends(get_db)):
-    rx = perform_raio_x(); status_color = "#00ff00" if "SEGURO" in rx["status"] else "#ff003c"
-    xp_points = (db.query(Enrollment).count() if db else 0) * 150
-    nivel = "Iniciante Social" if xp_points < 300 else "Pleno de Impacto" if xp_points < 1000 else "Sênior de Transformação"
-    init_fund(db) # Garante que o fundo existe
-
-    return f"""
-    <html>
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-        <style>
-            @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap');
-            body {{ margin: 0; padding: 20px; background: #050a15; color: #e2e8f0; font-family: 'Rajdhani', sans-serif; overflow-x: hidden; }}
-            #particles-js {{ position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }}
-            
-            .glass-card {{ background: rgba(16, 30, 56, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(0, 210, 255, 0.2); border-radius: 16px; padding: 25px; margin-bottom: 20px; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5); transition: 0.3s ease; }}
-            .glass-card:hover {{ transform: translateY(-5px); border-color: rgba(0, 210, 255, 0.5); }}
-            
-            .header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; margin-bottom: 20px; }}
-            h2, h3 {{ margin-top: 0; color: #fff; letter-spacing: 1px; }}
-            
-            .tabs {{ display: flex; gap: 10px; margin-bottom: 30px; overflow-x: auto; padding-bottom: 10px; justify-content: center; }}
-            .tab-btn {{ background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #8892b0; padding: 12px 25px; border-radius: 30px; cursor: pointer; font-weight: bold; transition: all 0.3s; font-family: 'Rajdhani', sans-serif; font-size: 1.1rem; }}
-            .tab-btn:hover {{ background: rgba(0, 210, 255, 0.1); color: #fff; }}
-            .tab-btn.active {{ background: linear-gradient(135deg, rgba(0,210,255,0.2), rgba(0,100,255,0.2)); border-color: #00d2ff; color: #fff; box-shadow: 0 0 15px rgba(0,210,255,0.3); }}
-            
-            .content {{ display: none; animation: fadeIn 0.5s; }}
-            .content.active {{ display: block; }}
-            @keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(10px); }} to {{ opacity: 1; transform: translateY(0); }} }}
-            
-            .info-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }}
-            .btn-action {{ background: transparent; border: 2px solid #00d2ff; color: #00d2ff; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.3s; font-family: 'Rajdhani', sans-serif; font-size: 1.1rem; }}
-            .btn-action:hover {{ background: #00d2ff; color: #000; box-shadow: 0 0 20px rgba(0, 210, 255, 0.5); }}
-            
-            .cyber-terminal {{ background: rgba(0, 0, 0, 0.7); border: 1px solid #0f0; padding: 20px; font-family: 'Courier New', monospace; color: #0f0; height: 300px; overflow-y: auto; border-radius: 8px; }}
-            
-            .form-input {{ width: 100%; background: rgba(0,0,0,0.5); border: 1px solid #00d2ff; color: #fff; padding: 15px; border-radius: 8px; font-family: 'Rajdhani'; font-size: 1rem; margin-bottom: 15px; resize: none; }}
-            .audit-list li {{ padding: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); }}
-        </style>
-        <script>
-            function openTab(evt, tabName) {{
-                document.querySelectorAll(".content").forEach(c => c.classList.remove("active"));
-                document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-                document.getElementById(tabName).classList.add("active");
-                evt.currentTarget.classList.add("active");
-                if(tabName === 'transparencia') loadLedger();
-            }}
-
-            async function loadLedger() {{
-                const res = await fetch('/api/transparency/ledger');
-                const data = await res.json();
-                
-                document.getElementById('fund-total').innerText = "R$ " + data.total_fund.toLocaleString('pt-BR', {{minimumFractionDigits: 2}});
-                
-                const txList = document.getElementById('tx-ledger');
-                txList.innerHTML = data.transactions.length ? data.transactions.map(t => 
-                    `<li><i class="fas fa-exchange-alt" style="color:#00d2ff;"></i> <b>${{t.description}}</b> - R$ ${{t.amount.toFixed(2)}}<br><small style="color:#8892b0;"><i class="fas fa-link"></i> HASH: ${{t.tx_hash}}</small></li>`
-                ).join('') : "<li>Nenhuma transação registrada.</li>";
-
-                const fbList = document.getElementById('fb-ledger');
-                fbList.innerHTML = data.feedbacks.length ? data.feedbacks.map(f => 
-                    `<li><i class="fas fa-bullhorn" style="color:#ffaa00;"></i> <b>Status: ${{f.status}}</b><br><small style="color:#8892b0;">Protocolo: ${{f.tracking_hash}}<br>Data: ${{f.timestamp.replace('T', ' ').substring(0,19)}}</small></li>`
-                ).join('') : "<li>Nenhum relato registrado.</li>";
-            }}
-
-            async function submitFeedback() {{
-                const text = document.getElementById('report-text').value;
-                const btn = document.getElementById('btn-report');
-                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Criptografando...';
-                
-                try {{
-                    const res = await fetch('/api/transparency/report', {{ method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify({{text: text}}) }});
-                    const data = await res.json();
-                    if(res.ok) {{
-                        document.getElementById('report-text').value = '';
-                        btn.innerHTML = '<i class="fas fa-check"></i> Enviado com Sucesso!';
-                        alert("SEU HASH DE ACOMPANHAMENTO: " + data.tracking_hash + "\\n\\nGuarde este código. Ninguém pode alterar sua denúncia.");
-                        loadLedger();
-                    }} else {{ btn.innerHTML = 'Erro ao enviar'; }}
-                }} catch (e) {{ btn.innerHTML = 'Erro de Rede'; }}
-                setTimeout(() => btn.innerHTML = '<i class="fas fa-paper-plane"></i> ENVIAR RELATO ANÔNIMO', 3000);
-            }}
-
-            // (Mantivemos as funções applyForSocialProgram e Chart.js idênticas aqui para brevidade visual)
-            window.onload = function() {{
-                particlesJS("particles-js", {{"particles": {{"number": {{"value": 50}},"color": {{"value": "#00d2ff"}},"shape": {{"type": "circle"}},"opacity": {{"value": 0.3}},"size": {{"value": 3}},"line_linked": {{"enable": true, "distance": 150, "color": "#00d2ff", "opacity": 0.2, "width": 1}},"move": {{"enable": true, "speed": 2}}}}}});
-            }};
-        </script>
-    </head>
-    <body>
-        <div id="particles-js"></div>
-        
-        <div class="header">
-            <h2><i class="fas fa-globe-americas"></i> CONECTA FUTURO <span style="color:#00d2ff">BRASIL</span></h2>
-            <div style="color:#00d2ff; font-weight:bold;"><i class="fas fa-satellite-dish"></i> NODE: ONLINE</div>
-        </div>
-        
-        <div class="tabs">
-            <button class="tab-btn active" onclick="openTab(event, 'perfil')"><i class="fas fa-user-astronaut"></i> DASHBOARD</button>
-            <button class="tab-btn" onclick="openTab(event, 'social')"><i class="fas fa-network-wired"></i> OPORTUNIDADES</button>
-            <button class="tab-btn" onclick="openTab(event, 'transparencia')"><i class="fas fa-search-dollar"></i> ANTI-CORRUPÇÃO</button>
-        </div>
-        
-        <div id="perfil" class="content active">
-            <div class="glass-card">
-                <h3 style="color:#00d2ff;"><i class="fas fa-microchip"></i> Raio-X de Rede</h3>
-                <ul style="list-style: none; padding: 0; line-height: 2;">
-                    <li><i class="fas fa-fingerprint" style="color:#8892b0; width:20px;"></i> Titular: <b style="color:#fff;">Rafael Machado Gomes Machado</b></li>
-                    <li><i class="fas fa-laptop" style="color:#8892b0; width:20px;"></i> Host: <b style="color:#fff;">{rx['host']}</b></li>
-                    <li><i class="fas fa-shield-virus" style="color:#8892b0; width:20px;"></i> Status EDR: <b style="color:{status_color};">{rx['status']}</b></li>
-                </ul>
-            </div>
-        </div>
-        
-        <div id="social" class="content">
-            <div class="info-grid">
-                <div class="glass-card"><h3><i class="fas fa-laptop-code"></i> Cyber Safety</h3><button class="btn-action">ACESSAR ACADEMIA</button></div>
-            </div>
-        </div>
-        
-        <div id="transparencia" class="content">
-            <div class="info-grid">
-                
-                <div class="glass-card">
-                    <h3 style="color:#00d2ff;"><i class="fas fa-landmark"></i> Fundo Social Público</h3>
-                    <p style="font-size:0.85rem; color:#8892b0;">Rastreio ponta a ponta dos recursos do protocolo.</p>
-                    <div style="font-size: 2.5rem; color: #fff; font-weight: bold; margin: 20px 0;" id="fund-total">R$ 0,00</div>
-                    
-                    <h4 style="color:#00d2ff; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:10px;">Últimas Movimentações</h4>
-                    <ul id="tx-ledger" class="audit-list" style="list-style:none; padding:0; margin:0;"></ul>
-                </div>
-
-                <div class="glass-card" style="border-color: rgba(255, 170, 0, 0.5);">
-                    <h3 style="color:#ffaa00;"><i class="fas fa-bullhorn"></i> Canal de Ouvidoria (Whistleblower)</h3>
-                    <p style="font-size:0.85rem; color:#8892b0;">Ferramenta de denúncia e feedback. Totalmente anônimo e protegido por criptografia de ponta a ponta.</p>
-                    
-                    <textarea id="report-text" class="form-input" rows="4" placeholder="Descreva aqui sua denúncia, irregularidade ou feedback estrutural para a comunidade..."></textarea>
-                    <button id="btn-report" class="btn-action" style="border-color:#ffaa00; color:#ffaa00;" onclick="submitFeedback()"><i class="fas fa-paper-plane"></i> ENVIAR RELATO ANÔNIMO</button>
-                    
-                    <h4 style="color:#ffaa00; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:10px; margin-top:25px;">Status das Investigações</h4>
-                    <ul id="fb-ledger" class="audit-list" style="list-style:none; padding:0; margin:0;"></ul>
-                </div>
-
-            </div>
-        </div>
-        
-    </body>
-    </html>
-    """
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+html = """
+<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CONECTA FUTURO BRASIL - PRO</title><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<style>
+:root { --neon: #00d2ff; --bg: #030712; --panel: rgba(16, 20, 28, 0.95); }
+body { background: var(--bg); color: #fff; font-family: 'Courier New', monospace; margin: 0; overflow-x: hidden; }
+canvas { position: fixed; top: 0; left: 0; z-index: -1; width: 100%; height: 100%; opacity: 0.4; }
+.container { max-width: 900px; margin: 20px auto; padding: 20px; position: relative; z-index: 1; }
+.hud { text-align: center; border: 1px solid var(--neon); padding: 10px; margin-bottom: 20px; box-shadow: 0 0 15px var(--neon); text-transform: uppercase; font-weight: bold; }
+.tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; justify-content: center; }
+.tab-btn { flex: 1 1 18%; background: #111827; border: 1px solid #374151; color: #9ca3af; padding: 12px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 0.7rem; transition: 0.3s; }
+.tab-btn.active { color: var(--neon); border-color: var(--neon); background: rgba(0, 210, 255, 0.15); box-shadow: 0 0 10px var(--neon); }
+.content { display: none; background: var(--panel); border: 1px solid var(--neon); padding: 20px; border-radius: 8px; animation: slideIn 0.3s ease-out; }
+@keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+input { width: 100%; padding: 12px; background: #000; border: 1px solid #333; color: var(--neon); margin-bottom: 15px; box-sizing: border-box; font-size: 1rem; }
+button.main-btn { background: var(--neon); color: #000; border: none; padding: 12px; width: 100%; font-weight: bold; cursor: pointer; text-transform: uppercase; border-radius: 4px; }
+.card { border-left: 4px solid var(--neon); background: rgba(255,255,255,0.03); padding: 15px; margin-bottom: 15px; }
+pre { background: #000; padding: 15px; color: #00ff00; font-size: 0.85rem; border: 1px solid #1f2937; overflow-x: auto; line-height: 1.5; }
+</style></head>
+<body><canvas id="bg"></canvas><div class="container">
+<div class="hud">OPERADOR [SOC ATIVO] | CFB V13 CORE</div>
+<div class="tabs">
+    <button class="tab-btn active" onclick="nav('osint', this, '#00d2ff')">OSINT</button>
+    <button class="tab-btn" onclick="nav('edu', this, '#a855f7')">CURSOS</button>
+    <button class="tab-btn" onclick="nav('jobs', this, '#22c55e')">VAGAS</button>
+    <button class="tab-btn" onclick="nav('hab', this, '#f59e0b')">MORADIA</button>
+    <button class="tab-btn" onclick="nav('fundo', this, '#ef4444')">FUNDO</button>
+</div>
+<div id="osint" class="content" style="display:block;"><h3><i class="fas fa-radar"></i> RASTREAMENTO PROFUNDO</h3><input type="text" id="target" placeholder="Site ou IP"><button class="main-btn" onclick="scan()">EXECUTAR ESPURGAÇÃO</button><pre id="out">AGUARDANDO COMANDO...</pre></div>
+<div id="edu" class="content"><h3><i class="fas fa-graduation-cap"></i> CAPACITAÇÃO</h3><div class="card"><h4>Cyber Security Essentials (Cisco)</h4><button class="main-btn" onclick="window.open('https://skillsforall.com','_blank')">ACESSAR ACADEMIA</button></div></div>
+<div id="jobs" class="content"><h3><i class="fas fa-briefcase"></i> OPORTUNIDADES</h3><div class="card"><h4>Portal Gupy - Rastrear Vagas</h4><button class="main-btn" onclick="window.open('https://portal.gupy.io/','_blank')">RASTREAR</button></div></div>
+<div id="hab" class="content"><h3><i class="fas fa-home"></i> HABITAÇÃO SOCIAL</h3><input type="text" id="cep_in" placeholder="Digite seu CEP para buscar serviços"><button class="main-btn" onclick="checkCEP()">BUSCAR LOCALIDADE</button><pre id="cep_out"></pre></div>
+<div id="fundo" class="content"><h3><i class="fas fa-wallet"></i> FUNDO MONEYLAYER</h3><input type="number" id="pix_v" placeholder="Valor R$"><button class="main-btn" style="background:#22c55e" onclick="genPix()">GERAR APORTE SOCIAL</button><div id="qr_box" style="text-align:center; display:none; margin-top:15px;"><img id="qr_img" src="" width="160"><p id="pix_h" style="font-size:0.65rem; color:#9ca3af;"></p></div></div>
+</div><script>
+let activeColor = '#00d2ff';
+function nav(id, btn, color) {
+    document.querySelectorAll('.content').forEach(e => e.style.display = 'none');
+    document.querySelectorAll('.tab-btn').forEach(e => e.classList.remove('active'));
+    document.getElementById(id).style.display = 'block'; btn.classList.add('active');
+    activeColor = color; document.documentElement.style.setProperty('--neon', color);
+}
+const canvas = document.getElementById('bg'), ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+const particles = list(); for(let i=0; i<80; i++) particles.push({x:Math.random()*canvas.width, y:Math.random()*canvas.height, vx:(Math.random()-0.5)*2, vy:(Math.random()-0.5)*2});
+function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle = activeColor;
+    particles.forEach(p => {
+        p.x += p.vx; p.y += p.vy; if(p.x<0 || p.x>canvas.width) p.vx*=-1; if(p.y<0 || p.y>canvas.height) p.vy*=-1;
+        ctx.beginPath(); ctx.arc(p.x,p.y,2,0,Math.PI*2); ctx.fill();
+    }); requestAnimationFrame(draw);
+} draw();
+async function scan() {
+    const t = document.getElementById('target').value; if(!t) return;
+    document.getElementById('out').innerText = '[*] Triangulando coordenadas do alvo...';
+    const r = await fetch('/api/osint/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({target:t})});
+    const d = await r.json(); document.getElementById('out').innerText = d.logs.join('\\n');
+}
+async function checkCEP() {
+    const c = document.getElementById('cep_in').value;
+    const r = await fetch('/api/social/cep', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({cep:c})});
+    const d = await r.json(); document.getElementById('cep_out').innerText = JSON.stringify(d, null, 2);
+}
+async function genPix() {
+    const a = document.getElementById('pix_v').value; if(!a) return;
+    const r = await fetch('/api/finance/pix', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({amount:a})});
+    const d = await r.json();
+    document.getElementById('qr_box').style.display='block'; document.getElementById('qr_img').src=d.qr;
+    document.getElementById('pix_h').innerText=`TX: ${d.hash}\nIP: ${d.ip}`;
+}
+</script></body></html>
+"""
+@app.get("/")
+async def home(): return HTMLResponse(content=html)
+if __name__ == "__main__": uvicorn.run(app, host="127.0.0.1", port=8000)
